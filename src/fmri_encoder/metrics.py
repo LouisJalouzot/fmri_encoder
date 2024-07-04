@@ -1,9 +1,17 @@
 import numpy as np
+import torch
+import torch.nn.functional as F
 from scipy.stats import pearsonr
 from sklearn.metrics import r2_score
 
-import torch
-import torch.nn.functional as F
+
+def swap_r2(x, y, axis):
+    if axis == 0:
+        return r2_score(x, y, multioutput="raw_values")
+    elif axis == 1:
+        return r2_score(x.swapaxes(0, 1), y.swapaxes(0, 1), multioutput="raw_values")
+    else:
+        raise ValueError(f"Axis {axis} not understood. Please use 0 or 1.")
 
 
 def get_metric(metric_name):
@@ -16,9 +24,9 @@ def get_metric(metric_name):
     metric_dic = {
         "r": corr,
         "r_nan": corr,
-        "r2": lambda x, y: r2_score(x, y, multioutput="raw_values"),
+        "r2": swap_r2,
         "r2_nan": r2_nan,
-        "mse": lambda x, y: mse(x, y, axis=0),
+        "mse": mse,
         "cosine_dist": cosine_dist,
         "mse_dist": mse,
     }

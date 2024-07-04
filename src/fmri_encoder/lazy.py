@@ -1,14 +1,23 @@
 import numpy as np
 from nilearn.image import clean_img
-from fmri_encoder.encoder import Encoder
-from fmri_encoder.data import fetch_masker
-from fmri_encoder.loaders import get_groups
 from sklearn.model_selection import LeavePOut
+
+from fmri_encoder.data import fetch_masker
+from fmri_encoder.encoder import Encoder
+from fmri_encoder.features import FeaturesPipe, FMRIPipe
+from fmri_encoder.loaders import get_groups
 from fmri_encoder.logger import console
-from fmri_encoder.features import FMRIPipe, FeaturesPipe
 
 
-def default_encoder(X_train, Y_train, X_test=None, Y_test=None):
+def default_encoder(
+    X_train,
+    Y_train,
+    X_test=None,
+    Y_test=None,
+    nscans=None,
+    return_preds=False,
+    nb_alphas=10,
+):
     """Run an encoder with default parameters.
     Args:
         - X_train: np.Arrays
@@ -17,25 +26,33 @@ def default_encoder(X_train, Y_train, X_test=None, Y_test=None):
         - Y_test: np.Arrays
     """
     # Instantiating the encoding model
-    linearmodel = "ridgecv"
+    linearmodel = "customridge"
     encoding_params = {
         "alpha": 0.001,
         "alpha_per_target": True,
+        "nb_alphas": nb_alphas,
+        "nscans": nscans,
     }
     encoder = Encoder(linearmodel=linearmodel, saving_folder=None, **encoding_params)
     encoder.fit(X_train, Y_train)
-
     # Testing on test set
+    results = {"coefs": encoder.coef_}
     if (X_test is not None) and (Y_test is not None):
         predictions = encoder.predict(X_test)
-        score = encoder.eval(predictions, Y_test, axis=0)
-    else:
-        predictions = None
-        score = None
-    return {"encoder": encoder, "score": score, "predictions": predictions}
+        scores = encoder.eval(predictions, Y_test, axis=0)
+        alpha = encoder.linearmodel.voxel2alpha
+        results.update(
+            {
+                "alpha": alpha,
+                **scores,
+            }
+        )
+        if return_preds:
+            results["predictions"] = predictions
+    return results
 
 
-def default_cv_encoder(X, Y, return_preds=False):
+def default_cv_encoder(X, Y, return_preds=False, nb_alphas=10):
     """
     Run a cross-validated encoder with default parameters.
     Args:
@@ -47,8 +64,7 @@ def default_cv_encoder(X, Y, return_preds=False):
     assert len(X) == len(Y)
     out_per_fold = 1
     logo = LeavePOut(out_per_fold)
-    scores = []
-    predictions = []
+    results = {}
 
     # Loop
     for train, test in logo.split(X):
@@ -56,20 +72,39 @@ def default_cv_encoder(X, Y, return_preds=False):
         X_train = np.vstack([X[i] for i in train])
         Y_test = np.vstack([Y[i] for i in test])
         X_test = np.vstack([X[i] for i in test])
-        output = default_encoder(X_train, Y_train, X_test, Y_test)
-        scores.append(output["score"])
-        if return_preds:
-            predictions.append(output["predictions"])
-    cv_score = np.mean(np.stack(scores, axis=0), axis=0)
+        nscans = [Y[i].shape[0] for i in train]
+        output = default_encoder(
+            X_train,
+            Y_train,
+            X_test,
+            Y_test,
+            nscans=nscans,
+            return_preds=return_preds,
+            nb_alphas=nb_alphas,
+        )
+        for value_name, values in output.items():
+            if value_name not in results:
+                results[value_name] = [values]
+            else:
+                results[value_name].append(values)
 
-    return {
-        "scores": scores,
-        "cv_score": cv_score,
-        "predictions": predictions,
-    }
+    for value_name, values in results.items():
+        if value_name != "predictions":
+            results[value_name] = np.mean(values, axis=0)
+
+    return results
 
 
-def default_processing(X, offsets, tr, Y=None, nscans=None, masker_path="masker"):
+def default_processing(
+    X,
+    offsets,
+    durations,
+    tr,
+    Y=None,
+    nscans=None,
+    masker_path="masker",
+    encoding_method="hrf",
+):
     """
     Run a cross-validated encoder with default parameters.
     Args:
@@ -81,9 +116,9 @@ def default_processing(X, offsets, tr, Y=None, nscans=None, masker_path="masker"
         - nscans: list of int
     """
     # Instantiating the encoding model
-    encoding_method = "hrf"
 
     assert len(offsets) == len(X)
+    assert len(durations) == len(X)
     if Y is not None:
         assert len(Y) == len(X)
     else:
@@ -120,15 +155,23 @@ def default_processing(X, offsets, tr, Y=None, nscans=None, masker_path="masker"
             tr=tr,
             groups=get_groups([offset_x]),
             gentles=[offset_x],
+            durations=[duration_x],
             nscans=[nscan_x],
         )
-        for (x, offset_x, nscan_x) in zip(X, offsets, nscans)
+        for (x, offset_x, duration_x, nscan_x) in zip(X, offsets, durations, nscans)
     ]
     return {"X": X, "Y": Y, "masker": masker, "nscans": nscans}
 
 
 def default_process_and_cv_encode(
-    X, Y, offsets, tr, return_preds=False, masker_path="masker"
+    X,
+    Y,
+    offsets,
+    tr,
+    return_preds=False,
+    masker_path="masker",
+    encoding_method="hrf",
+    nb_alphas=10,
 ):
     """
     Run a cross-validated encoder with default parameters.
@@ -139,11 +182,19 @@ def default_process_and_cv_encode(
         - offsets: list of np.Arrays
         - return_preds: bool
     """
-    processed_data = default_processing(X, offsets, tr, Y, masker_path=masker_path)
+
+    processed_data = default_processing(
+        X,
+        offsets,
+        tr,
+        Y,
+        masker_path=masker_path,
+        encoding_method=encoding_method,
+    )
     X = processed_data["X"]
     Y = processed_data["Y"]
 
-    output = default_cv_encoder(X, Y, return_preds=return_preds)
+    output = default_cv_encoder(X, Y, return_preds=return_preds, nb_alphas=nb_alphas)
 
     return output
 

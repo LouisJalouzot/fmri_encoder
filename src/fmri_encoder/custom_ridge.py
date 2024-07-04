@@ -1,13 +1,11 @@
 import numpy as np
-
-from sklearn.metrics import r2_score
-from scipy.stats import pearsonr
-from sklearn.linear_model import Ridge
-from sklearn.base import BaseEstimator, TransformerMixin
-
 from joblib import Parallel, delayed
+from scipy.stats import pearsonr
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.linear_model import Ridge
+from sklearn.metrics import r2_score
 
-from fmri_encoder.logger import rich_progress_joblib, get_progress, console
+from fmri_encoder.logger import console, get_progress, rich_progress_joblib
 from fmri_encoder.utils import check_folder
 
 
@@ -26,6 +24,10 @@ class CustomRidge(BaseEstimator, TransformerMixin):
         else:
             self.nscans = nscans
         self.model = Ridge()
+
+    @property
+    def coef_(self):
+        return self.model.coef_
 
     def fit(self, X, y):
         """Fit the model for a given set of runs.

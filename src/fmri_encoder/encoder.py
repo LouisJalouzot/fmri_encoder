@@ -3,16 +3,15 @@ import warnings
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
 import os
+
 import joblib
 from omegaconf import OmegaConf
-
 from sklearn.pipeline import Pipeline
 
+from fmri_encoder.loaders import get_linearmodel
+from fmri_encoder.logger import console
 from fmri_encoder.metrics import get_metric
 from fmri_encoder.utils import check_folder, read_yaml
-from fmri_encoder.loaders import get_linearmodel
-
-from fmri_encoder.logger import console
 
 
 class Encoder(object):
@@ -30,6 +29,10 @@ class Encoder(object):
             check_folder(saving_folder)
         self.saving_folder = saving_folder
         self.verbose = verbose
+
+    @property
+    def coef_(self):
+        return self.linearmodel.coef_
 
     def fit(self, X, y):
         """Fit the encoding model using Features X and fmri data y.
@@ -78,21 +81,23 @@ class Encoder(object):
         prediction = self.encoding_pipe.predict(X)
         return prediction
 
-    def eval(self, Y_predicted, Y_true, metric_name="r", axis=-1):
+    def eval(self, Y_predicted, Y_true, metric_names=["r", "r2", "mse"], axis=-1):
         """Compare the predicted ‘Y_predicted‘ with the ground truth ‘Y‘ using the specified ‘metric‘
         Args:
             - Y_predicted: np.Array
             - Y_true: np.Array
-            - metric_name: str or sklearn buit-in function (metric used for the comparison)
+            - metric_names: list str or sklearn buit-in function (metric used for the comparison)
         Returns:
             - evaluation: np.array
         """
-        metric = get_metric(metric_name)
-        if self.verbose:
-            console.log(
-                f"Evaluating the similarity between Y_predicted and Y_true, using metric {metric_name}..."
-            )
-        evaluation = metric(Y_predicted, Y_true, axis=axis)
+        evaluation = {}
+        for metric_name in metric_names:
+            metric = get_metric(metric_name)
+            if self.verbose:
+                console.log(
+                    f"Evaluating the similarity between Y_predicted and Y_true, using metric {metric_name}..."
+                )
+            evaluation[metric_name] = metric(Y_true, Y_predicted, axis=axis)
         return evaluation
 
     def get_coef(self):

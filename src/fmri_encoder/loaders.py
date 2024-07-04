@@ -3,9 +3,9 @@ import warnings
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
 import numpy as np
-from sklearn.decomposition import PCA
 from sklearn.cluster import FeatureAgglomeration
-from sklearn.linear_model import RidgeCV, LinearRegression, Ridge
+from sklearn.decomposition import PCA
+from sklearn.linear_model import LinearRegression, Ridge, RidgeCV
 
 from fmri_encoder.custom_ridge import CustomRidge
 
@@ -43,7 +43,6 @@ def get_possible_reduction_methods():
         - list
     """
     return [None, "pca", "agglomerative_clustering"]
-
 
 def get_linearmodel(
     name,
